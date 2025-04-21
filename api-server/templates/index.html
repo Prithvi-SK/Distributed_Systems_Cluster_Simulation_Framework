@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Cluster Simulation{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <button id="check-system-status" class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-stethoscope"></i> System Diagnostics
+        </button>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card text-white bg-primary mb-3">
+            <div class="card-header">Total Nodes</div>
+            <div class="card-body">
+                <h5 class="card-title display-4" id="total-nodes">{{ nodes|length }}</h5>
+                <p class="card-text">Running nodes in the cluster</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-white bg-success mb-3">
+            <div class="card-header">Online Nodes</div>
+            <div class="card-body">
+                <h5 class="card-title display-4" id="online-nodes">{{ online_nodes }}</h5>
+                <p class="card-text">Healthy nodes in the cluster</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card text-white bg-info mb-3">
+            <div class="card-header">Total Pods</div>
+            <div class="card-body">
+                <h5 class="card-title display-4" id="total-pods">{{ total_pods }}</h5>
+                <p class="card-text">Running pods in the cluster</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                CPU Utilization
+            </div>
+            <div class="card-body">
+                <canvas id="cpu-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                Node Status
+            </div>
+            <div class="card-body">
+                <canvas id="node-status-chart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                Recent Activities
+            </div>
+            <div class="card-body">
+                <ul class="list-group" id="activity-log">
+                    {% for activity in activities %}
+                    <li class="list-group-item">
+                        <span class="badge bg-{{ activity.type }}">{{ activity.time }}</span>
+                        {{ activity.message }}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Status Modal -->
+<div class="modal fade" id="systemStatusModal" tabindex="-1" aria-labelledby="systemStatusModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="systemStatusModalLabel">System Diagnostics</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-header">
+                                <h6 class="mb-0">Node Status</h6>
+                            </div>
+                            <div class="card-body">
+                                <p>Total Nodes: <span id="diag-total-nodes" class="fw-bold"></span></p>
+                                <p>Online: <span id="diag-online-nodes" class="badge bg-success"></span></p>
+                                <p>Offline: <span id="diag-offline-nodes" class="badge bg-danger"></span></p>
+                                <p>Starting: <span id="diag-starting-nodes" class="badge bg-warning"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-header">
+                                <h6 class="mb-0">Resources</h6>
+                            </div>
+                            <div class="card-body">
+                                <p>Total CPU Cores: <span id="diag-total-cpu" class="fw-bold"></span></p>
+                                <p>Available CPU: <span id="diag-available-cpu" class="fw-bold"></span></p>
+                                <p>Current Scheduler: <span id="diag-scheduler" class="badge bg-info"></span></p>
+                                <p>Total Pods: <span id="diag-total-pods" class="badge bg-primary"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card bg-light">
+                    <div class="card-header">
+                        <h6 class="mb-0">Node Details</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Node ID</th>
+                                        <th>Status</th>
+                                        <th>CPU</th>
+                                        <th>Available CPU</th>
+                                        <th>Pods</th>
+                                        <th>Heartbeat (s ago)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="diag-node-details">
+                                    <!-- Node details will be populated here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-3">
+                    <h6>Troubleshooting Tips:</h6>
+                    <ul class="small">
+                        <li>If nodes remain in "starting" status, check if they're receiving heartbeats</li>
+                        <li>If launching pods fails, ensure you have online nodes with sufficient CPU</li>
+                        <li>Nodes should transition from "starting" to "online" within 15 seconds</li>
+                        <li>Try restarting the application if nodes consistently fail to come online</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="refresh-diagnostics">Refresh Data</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // CPU Utilization Chart
+    const cpuCtx = document.getElementById('cpu-chart').getContext('2d');
+    const cpuChart = new Chart(cpuCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ node_ids|tojson }},
+            datasets: [{
+                label: 'Total CPU',
+                data: {{ cpu_total|tojson }},
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }, {
+                label: 'Available CPU',
+                data: {{ cpu_available|tojson }},
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // Node Status Chart
+    const statusCtx = document.getElementById('node-status-chart').getContext('2d');
+    const statusChart = new Chart(statusCtx, {
+        type: 'pie',
+        data: {
+            labels: ['Online', 'Offline', 'Starting'],
+            datasets: [{
+                data: [{{ status_counts.online }}, {{ status_counts.offline }}, {{ status_counts.starting }}],
+                backgroundColor: [
+                    'rgba(75, 192, 192, 0.5)',
+                    'rgba(255, 99, 132, 0.5)',
+                    'rgba(255, 206, 86, 0.5)'
+                ],
+                borderColor: [
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(255, 206, 86, 1)'
+                ],
+                borderWidth: 1
+            }]
+        }
+    });
+
+    // Real-time update function
+    function updateDashboard() {
+        fetch('/api/dashboard_data')
+            .then(response => response.json())
+            .then(data => {
+                // Update counters
+                document.getElementById('total-nodes').textContent = data.total_nodes;
+                document.getElementById('online-nodes').textContent = data.online_nodes;
+                document.getElementById('total-pods').textContent = data.total_pods;
+                
+                // Update charts
+                cpuChart.data.labels = data.node_ids;
+                cpuChart.data.datasets[0].data = data.cpu_total;
+                cpuChart.data.datasets[1].data = data.cpu_available;
+                cpuChart.update();
+                
+                statusChart.data.datasets[0].data = [
+                    data.status_counts.online, 
+                    data.status_counts.offline, 
+                    data.status_counts.starting
+                ];
+                statusChart.update();
+                
+                // Update activity log
+                const activityLog = document.getElementById('activity-log');
+                if (data.activities && data.activities.length > 0) {
+                    // Add new activities
+                    data.activities.forEach(activity => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item';
+                        li.innerHTML = `<span class="badge bg-${activity.type}">${activity.time}</span> ${activity.message}`;
+                        activityLog.prepend(li);
+                    });
+                    
+                    // Remove excess items
+                    while (activityLog.children.length > 10) {
+                        activityLog.removeChild(activityLog.lastChild);
+                    }
+                }
+            })
+            .catch(error => console.error('Error updating dashboard:', error));
+    }
+    
+    // Update every 5 seconds
+    setInterval(updateDashboard, 5000);
+    
+    // System diagnostics
+    document.getElementById('check-system-status').addEventListener('click', function() {
+        loadSystemDiagnostics();
+        const systemStatusModal = new bootstrap.Modal(document.getElementById('systemStatusModal'));
+        systemStatusModal.show();
+    });
+    
+    document.getElementById('refresh-diagnostics').addEventListener('click', loadSystemDiagnostics);
+    
+    function loadSystemDiagnostics() {
+        fetch('/api/system_status')
+            .then(response => response.json())
+            .then(data => {
+                // Update summary stats
+                document.getElementById('diag-total-nodes').textContent = data.nodes.total;
+                document.getElementById('diag-online-nodes').textContent = data.nodes.online;
+                document.getElementById('diag-offline-nodes').textContent = data.nodes.offline;
+                document.getElementById('diag-starting-nodes').textContent = data.nodes.starting;
+                document.getElementById('diag-total-cpu').textContent = data.resources.total_cpu;
+                document.getElementById('diag-available-cpu').textContent = data.resources.available_cpu;
+                document.getElementById('diag-scheduler').textContent = data.scheduler;
+                document.getElementById('diag-total-pods').textContent = data.pods.total;
+                
+                // Update node details table
+                const tbody = document.getElementById('diag-node-details');
+                tbody.innerHTML = '';
+                
+                if (data.node_details.length === 0) {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td colspan="6" class="text-center">No nodes available</td>';
+                    tbody.appendChild(row);
+                } else {
+                    data.node_details.forEach(node => {
+                        const statusClass = node.status === 'online' ? 'success' : 
+                                          (node.status === 'offline' ? 'danger' : 'warning');
+                        
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${node.id}</td>
+                            <td><span class="badge bg-${statusClass}">${node.status}</span></td>
+                            <td>${node.cpu}</td>
+                            <td>${node.available_cpu}</td>
+                            <td>${node.pods_count}</td>
+                            <td>${Math.round(node.last_heartbeat_ago)}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                }
+            })
+            .catch(error => console.error('Error loading diagnostics:', error));
+    }
+});
+</script>
+{% endblock %} 

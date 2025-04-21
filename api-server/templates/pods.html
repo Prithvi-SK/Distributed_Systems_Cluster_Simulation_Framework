@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}Pods - Cluster Simulation{% endblock %}
+
+{% block page_title %}Pods Management{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Launch New Pod</span>
+                <span class="badge bg-info text-white">Using {{ current_scheduler|capitalize }} Scheduler</span>
+            </div>
+            <div class="card-body">
+                <form id="launch-pod-form" class="row g-3">
+                    <div class="col-md-6">
+                        <label for="pod-cpu" class="form-label">CPU Requirements</label>
+                        <input type="number" class="form-control" id="pod-cpu" min="1" value="1" required>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary">Launch Pod</button>
+                        <a href="{{ url_for('nodes_page') }}" class="btn btn-outline-secondary ms-2">Change Scheduler</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Pod Distribution</span>
+                <button id="refresh-pods" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <canvas id="pod-distribution-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <span>All Pods</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Pod ID</th>
+                                <th>Node</th>
+                                <th>CPU Usage</th>
+                                <th>Node Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pods-table-body">
+                            {% for node_id, node_info in nodes.items() %}
+                                {% for pod in node_info.pods %}
+                                <tr>
+                                    <td>{{ pod.id }}</td>
+                                    <td>{{ node_id }}</td>
+                                    <td>{{ pod.cpu }}</td>
+                                    <td>
+                                        <span class="badge bg-{{ 'success' if node_info.status == 'online' else 'danger' if node_info.status == 'offline' else 'warning' }}">
+                                            {{ node_info.status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Launch pod form submission
+    const launchPodForm = document.getElementById('launch-pod-form');
+    launchPodForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const cpuRequired = document.getElementById('pod-cpu').value;
+        
+        fetch('/launch_pod', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                cpu: parseInt(cpuRequired)
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                // Show success notification
+                showNotification('Pod launched successfully!', 'success');
+                refreshPodData();
+            } else {
+                // Show more detailed error message based on status
+                let errorMessage = data.error || 'An unknown error occurred';
+                let errorType = 'danger';
+                
+                if (data.status === 'no_online_nodes') {
+                    errorMessage += ' Please add a node and wait for it to come online before trying again.';
+                    errorType = 'warning';
+                } else if (data.status === 'insufficient_cpu') {
+                    errorMessage += ' Try requesting fewer CPU cores or add a node with more resources.';
+                    errorType = 'warning';
+                }
+                
+                showNotification(errorMessage, errorType);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('An error occurred while launching the pod.', 'danger');
+        });
+    });
+
+    // Refresh pods button
+    document.getElementById('refresh-pods').addEventListener('click', refreshPodData);
+
+    // Pod distribution chart initialization
+    const podDistributionCtx = document.getElementById('pod-distribution-chart').getContext('2d');
+    const podDistributionChart = new Chart(podDistributionCtx, {
+        type: 'bar',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Pods per Node',
+                data: [],
+                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    stepSize: 1
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Number of Pods per Node'
+                }
+            }
+        }
+    });
+
+    // Function to refresh pod data
+    function refreshPodData() {
+        fetch('/list_nodes')
+            .then(response => response.json())
+            .then(data => {
+                // Update pod distribution chart
+                const nodeIds = Object.keys(data);
+                const podsPerNode = nodeIds.map(nodeId => data[nodeId].pods.length);
+                
+                podDistributionChart.data.labels = nodeIds;
+                podDistributionChart.data.datasets[0].data = podsPerNode;
+                podDistributionChart.update();
+                
+                // Update pods table
+                const tbody = document.getElementById('pods-table-body');
+                tbody.innerHTML = '';
+                
+                Object.entries(data).forEach(([nodeId, nodeInfo]) => {
+                    const statusClass = nodeInfo.status === 'online' ? 'success' : 
+                                      (nodeInfo.status === 'offline' ? 'danger' : 'warning');
+                    
+                    nodeInfo.pods.forEach(pod => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${pod.id}</td>
+                            <td>${nodeId}</td>
+                            <td>${pod.cpu}</td>
+                            <td><span class="badge bg-${statusClass}">${nodeInfo.status}</span></td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                });
+            })
+            .catch(error => console.error('Error refreshing pod data:', error));
+    }
+    
+    // Function to show notification
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} alert-dismissible fade show`;
+        notification.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        
+        // Insert at the top of the content area
+        const contentArea = document.querySelector('.card:first-child');
+        if (contentArea) {
+            contentArea.parentNode.insertBefore(notification, contentArea);
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+    }
+    
+    // Initial refresh
+    refreshPodData();
+    
+    // Auto-refresh every 10 seconds
+    setInterval(refreshPodData, 10000);
+});
+</script>
+{% endblock %} 

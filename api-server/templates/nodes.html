@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+
+{% block title %}Nodes - Cluster Simulation{% endblock %}
+
+{% block page_title %}Nodes Management{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Add New Node</span>
+            </div>
+            <div class="card-body">
+                <form id="add-node-form" class="row g-3">
+                    <div class="col-md-6">
+                        <label for="cpu-cores" class="form-label">CPU Cores</label>
+                        <input type="number" class="form-control" id="cpu-cores" min="1" value="2" required>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary">Add Node</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Scheduling Algorithm</span>
+            </div>
+            <div class="card-body">
+                <form id="scheduler-form" class="row g-3">
+                    <div class="col-md-6">
+                        <label for="scheduler-select" class="form-label">Select Algorithm</label>
+                        <select class="form-select" id="scheduler-select" required>
+                            <option value="first-fit" {% if current_scheduler == 'first-fit' %}selected{% endif %}>First Fit</option>
+                            <option value="best-fit" {% if current_scheduler == 'best-fit' %}selected{% endif %}>Best Fit</option>
+                            <option value="worst-fit" {% if current_scheduler == 'worst-fit' %}selected{% endif %}>Worst Fit</option>
+                            <option value="round-robin" {% if current_scheduler == 'round-robin' %}selected{% endif %}>Round Robin</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary">Set Algorithm</button>
+                    </div>
+                </form>
+                <div class="mt-3">
+                    <h6>Current Algorithm: <span class="badge bg-info" id="current-algorithm">{{ current_scheduler|capitalize }}</span></h6>
+                    <p class="small text-muted mb-0" id="algorithm-description"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Node List</span>
+                <button id="refresh-nodes" class="btn btn-sm btn-outline-secondary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>Node ID</th>
+                                <th>Status</th>
+                                <th>CPU Cores</th>
+                                <th>Available CPU</th>
+                                <th>Pods</th>
+                                <th>Last Heartbeat</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nodes-table-body">
+                            {% for node_id, info in nodes.items() %}
+                            <tr>
+                                <td>{{ node_id }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if info.status == 'online' else 'danger' if info.status == 'offline' else 'warning' }}">
+                                        {{ info.status }}
+                                    </span>
+                                </td>
+                                <td>{{ info.cpu }}</td>
+                                <td>{{ info.available_cpu }}</td>
+                                <td>{{ info.pods|length }}</td>
+                                <td>{{ info.last_heartbeat|timestamp_to_time }}</td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button class="btn btn-info view-pods" data-node-id="{{ node_id }}">
+                                            <i class="fas fa-eye"></i> View Pods
+                                        </button>
+                                        <button class="btn btn-danger delete-node" data-node-id="{{ node_id }}">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pod Details Modal -->
+<div class="modal fade" id="podDetailsModal" tabindex="-1" aria-labelledby="podDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="podDetailsModalLabel">Pods on <span id="modal-node-id"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Pod ID</th>
+                                <th>CPU Usage</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-pods-table-body">
+                            <!-- Pod data will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Node Confirmation Modal -->
+<div class="modal fade" id="deleteNodeModal" tabindex="-1" aria-labelledby="deleteNodeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteNodeModalLabel">Confirm Node Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete node <span id="delete-node-id" class="fw-bold"></span>?</p>
+                <p id="delete-node-warning" class="text-danger"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-node">Delete Node</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Algorithm descriptions
+    const algorithmDescriptions = {
+        'first-fit': 'Places pods on the first node with enough available CPU. Simple and efficient.',
+        'best-fit': 'Places pods on the node with minimum adequate available CPU. Minimizes fragmentation.',
+        'worst-fit': 'Places pods on the node with maximum available CPU. Better for handling large future pods.',
+        'round-robin': 'Distributes pods evenly across nodes in a circular order.'
+    };
+    
+    // Update algorithm description on load
+    updateAlgorithmDescription();
+    
+    function updateAlgorithmDescription() {
+        const currentAlgo = document.getElementById('scheduler-select').value;
+        document.getElementById('algorithm-description').textContent = algorithmDescriptions[currentAlgo];
+    }
+    
+    // Update description when selection changes
+    document.getElementById('scheduler-select').addEventListener('change', updateAlgorithmDescription);
+    
+    // Add node form submission
+    const addNodeForm = document.getElementById('add-node-form');
+    addNodeForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const cpuCores = document.getElementById('cpu-cores').value;
+        
+        fetch('/add_node', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                cpu_cores: parseInt(cpuCores)
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                showNotification('Node added successfully!', 'success');
+                refreshNodeList();
+            } else {
+                showNotification('Error: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('An error occurred while adding the node.', 'danger');
+        });
+    });
+
+    // Scheduler form submission
+    const schedulerForm = document.getElementById('scheduler-form');
+    schedulerForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const scheduler = document.getElementById('scheduler-select').value;
+        
+        fetch('/set_scheduler', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                scheduler: scheduler
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                document.getElementById('current-algorithm').textContent = scheduler.charAt(0).toUpperCase() + scheduler.slice(1);
+                showNotification('Scheduler changed to ' + scheduler, 'success');
+            } else {
+                showNotification('Error: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('An error occurred while changing the scheduler.', 'danger');
+        });
+    });
+
+    // Refresh nodes button
+    document.getElementById('refresh-nodes').addEventListener('click', refreshNodeList);
+
+    // View pods buttons
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('view-pods') || e.target.parentElement.classList.contains('view-pods')) {
+            const button = e.target.classList.contains('view-pods') ? e.target : e.target.parentElement;
+            const nodeId = button.getAttribute('data-node-id');
+            showPodDetails(nodeId);
+        }
+    });
+
+    // Delete node buttons
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('delete-node') || e.target.parentElement.classList.contains('delete-node')) {
+            const button = e.target.classList.contains('delete-node') ? e.target : e.target.parentElement;
+            const nodeId = button.getAttribute('data-node-id');
+            
+            // Find pods count for this node
+            let podsCount = 0;
+            const tableRow = button.closest('tr');
+            if (tableRow) {
+                const podsCell = tableRow.querySelector('td:nth-child(5)');
+                if (podsCell) {
+                    podsCount = parseInt(podsCell.textContent) || 0;
+                }
+            }
+            
+            // Display confirmation modal
+            document.getElementById('delete-node-id').textContent = nodeId;
+            if (podsCount > 0) {
+                document.getElementById('delete-node-warning').textContent = 
+                    `This node has ${podsCount} running pods that will need to be rescheduled.`;
+            } else {
+                document.getElementById('delete-node-warning').textContent = '';
+            }
+            
+            const deleteNodeModal = new bootstrap.Modal(document.getElementById('deleteNodeModal'));
+            deleteNodeModal.show();
+            
+            // Set click handler for confirm delete button
+            document.getElementById('confirm-delete-node').onclick = function() {
+                deleteNode(nodeId);
+                deleteNodeModal.hide();
+            };
+        }
+    });
+
+    // Function to delete a node
+    function deleteNode(nodeId) {
+        fetch('/delete_node', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                node_id: nodeId
+            }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                showNotification('Node deleted successfully', 'success');
+                refreshNodeList();
+            } else {
+                showNotification('Error: ' + data.error, 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('An error occurred while deleting the node.', 'danger');
+        });
+    }
+
+    // Function to refresh node list
+    function refreshNodeList() {
+        fetch('/list_nodes')
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('nodes-table-body');
+                tbody.innerHTML = '';
+                
+                Object.entries(data).forEach(([nodeId, info]) => {
+                    const statusClass = info.status === 'online' ? 'success' : 
+                                       (info.status === 'offline' ? 'danger' : 'warning');
+                    
+                    const lastHeartbeat = new Date(info.last_heartbeat * 1000).toLocaleString();
+                    
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${nodeId}</td>
+                        <td><span class="badge bg-${statusClass}">${info.status}</span></td>
+                        <td>${info.cpu}</td>
+                        <td>${info.available_cpu}</td>
+                        <td>${info.pods.length}</td>
+                        <td>${lastHeartbeat}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button class="btn btn-info view-pods" data-node-id="${nodeId}">
+                                    <i class="fas fa-eye"></i> View Pods
+                                </button>
+                                <button class="btn btn-danger delete-node" data-node-id="${nodeId}">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            })
+            .catch(error => console.error('Error refreshing nodes:', error));
+    }
+
+    // Function to show pod details
+    function showPodDetails(nodeId) {
+        fetch(`/nodes/${nodeId}/pods`)
+            .then(response => response.json())
+            .then(data => {
+                const modalNodeId = document.getElementById('modal-node-id');
+                const modalPodsTableBody = document.getElementById('modal-pods-table-body');
+                
+                modalNodeId.textContent = nodeId;
+                modalPodsTableBody.innerHTML = '';
+                
+                if (data.pods && data.pods.length > 0) {
+                    data.pods.forEach(pod => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${pod.id}</td>
+                            <td>${pod.cpu} cores</td>
+                        `;
+                        modalPodsTableBody.appendChild(row);
+                    });
+                } else {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td colspan="2" class="text-center">No pods running on this node</td>`;
+                    modalPodsTableBody.appendChild(row);
+                }
+                
+                // Show the modal
+                const podDetailsModal = new bootstrap.Modal(document.getElementById('podDetailsModal'));
+                podDetailsModal.show();
+            })
+            .catch(error => console.error('Error loading pod details:', error));
+    }
+    
+    // Function to show notification
+    function showNotification(message, type = 'success') {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} alert-dismissible fade show`;
+        notification.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        `;
+        
+        // Insert at the top of the content area
+        const contentArea = document.querySelector('.card:first-child');
+        if (contentArea) {
+            contentArea.parentNode.insertBefore(notification, contentArea);
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+    }
+    
+    // Initial refresh
+    refreshNodeList();
+    
+    // Auto-refresh every 10 seconds
+    setInterval(refreshNodeList, 10000);
+});
+</script>
+{% endblock %} 
