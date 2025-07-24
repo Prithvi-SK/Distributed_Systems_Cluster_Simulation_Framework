@@ -45,8 +45,3 @@ A lightweight simulation of a Kubernetes-like distributed cluster built with **F
 
 ---
 
-## 🚀 Team
-- Prithvi S K
-- Rishav Sinha
-- Riya Shetty
-- Pranay Saxena
